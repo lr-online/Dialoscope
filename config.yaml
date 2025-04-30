@@ -21,18 +21,14 @@ providers:
 # Define settings for each agent participating in the debate.
 agents:
   proponent: # 正方
-    provider: ollama
-    model: gemma3:latest
-    # Optional: Define a specific prompt template or path to a prompt file
-    # prompt: "You are the proponent arguing vigorously for the motion..."
-    # prompt_file: "prompts/proponent.txt"
+    provider: openai
+    model: gpt-4.1-nano-2025-04-14
+
 
   opponent: # 反方
-    provider: ollama
-    model: qwen2.5:latest
-    # prompt: "You are the opponent arguing strongly against the motion..."
+    provider: openai
+    model: gpt-4.1-nano-2025-04-14
 
   judge: # 评审
     provider: openai
-    model: gpt-4o-mini
-    # prompt: "You are the impartial judge, evaluating the arguments based on logic and evidence..."
+    model: gpt-4.1-nano-2025-04-14

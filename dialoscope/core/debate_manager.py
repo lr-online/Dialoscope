@@ -93,9 +93,8 @@ class DebateManager:
         # Store current round for _handle_agent_turn
         self.current_round = 0 
 
-        initial_message = f"辩论开始，辩题：{self.proposition}\n计划轮数: {self.rounds}\nLLM 客户端: {type(self.proponent.llm_client).__name__}"
+        initial_message = f"辩论开始，辩题：{self.proposition}\n计划轮数: {self.rounds}\n"
         # Print initial message and add to history
-        self._print_non_stream_message("系统", initial_message)
         self._add_message_to_history("系统", initial_message)
 
         for i in range(self.rounds):
