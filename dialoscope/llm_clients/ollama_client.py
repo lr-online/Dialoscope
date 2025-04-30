@@ -1,5 +1,5 @@
 import ollama
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterator
 
 from .base import LLMClient
 
@@ -26,7 +26,7 @@ class OllamaClient(LLMClient):
         #     print(f"Warning: Could not connect to Ollama at {self.base_url}: {e}")
         
     def generate_response(self, messages: List[Dict[str, str]]) -> str:
-        """Generate a response using the Ollama API."""
+        """Generate a complete response using the Ollama API."""
         try:
             response = self.client.chat(
                 model=self.model,
@@ -37,6 +37,29 @@ class OllamaClient(LLMClient):
             return content if content else ""
         except Exception as e:
             # TODO: Add more robust error handling
-            print(f"Error calling Ollama API: {e}")
+            print(f"Error calling Ollama API (non-stream): {e}")
             # In case of API error, return a predefined message or raise exception
             return f"[Error generating response from Ollama ({self.model})]" 
+
+    def generate_response_stream(self, messages: List[Dict[str, str]]) -> Iterator[str]:
+        """Generate a response stream using the Ollama API."""
+        try:
+            stream = self.client.chat(
+                model=self.model,
+                messages=messages,
+                stream=True
+            )
+            for chunk in stream:
+                # Ensure the chunk and message content exist before accessing
+                if chunk and 'message' in chunk and 'content' in chunk['message']:
+                    content = chunk['message']['content']
+                    if content:
+                        yield content
+                # Optional: Handle other parts of the chunk if needed, e.g., final response stats
+                # if chunk.get('done'):
+                #     final_data = chunk # Contains total_duration, prompt_eval_count, etc.
+                #     # print(f"\nStream finished. Stats: {final_data}")
+
+        except Exception as e:
+            print(f'Error calling Ollama API (stream): {e}')
+            yield f'[Error generating streaming response from Ollama ({self.model})]' 

@@ -1,6 +1,6 @@
 import abc
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterator
 
 from dialoscope.llm_clients import LLMClient
 
@@ -81,6 +81,29 @@ class Agent(abc.ABC):
             # Catch potential errors from the client's generate_response
             print(f"Error during LLM response generation for {self.role}: {e}")
             return f"(调用 {type(self.llm_client).__name__} 时出错: {e})"
+
+    def generate_response_stream(
+        self,
+        proposition: str,
+        history: List[Dict[str, Any]],
+        current_round: int | None = None,
+        total_rounds: int | None = None
+        ) -> Iterator[str]:
+        """
+        Generates response chunks as a stream.
+        """
+        # 1. Create messages using the subclass's logic
+        messages = self._create_llm_messages(proposition, history, current_round, total_rounds)
+
+        # 2. Call the LLM client's streaming generation method and yield chunks
+        try:
+            # Yield each chunk as it arrives from the client
+            yield from self.llm_client.generate_response_stream(messages)
+        except Exception as e:
+            # Catch potential errors during stream generation
+            print(f"Error during LLM stream generation for {self.role}: {e}")
+            # Yield an error message chunk
+            yield f"(调用 {type(self.llm_client).__name__} 流式接口时出错: {e})"
 
 
 class ProponentAgent(Agent):

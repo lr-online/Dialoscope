@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dialoscope"
+version = "0.1.0"  # 你可以根据需要更改版本
+description = "Dialoscope: An AI multi-agent debate framework"
+readme = "README.md" # 如果你有 README 文件
+requires-python = ">=3.8" # 指定你的 Python 版本要求
+dependencies = [
+    "typer[all]>=0.9.0", # [all] 包含了 rich
+    "openai>=1.0.0",
+    "ollama>=0.1.8", # 根据你使用的 Ollama 客户端库
+    "pyyaml>=6.0",
+    # 添加其他你直接使用的库，例如 requests, aiohttp 如果你的 client 用到了
+]
+
+# 这部分是关键，它告诉 setuptools 如何创建命令行脚本
+[project.scripts]
+dialoscope = "dialoscope.cli:app"
+
+# 添加 tool.setuptools 配置来指导包发现
+[tool.setuptools.packages.find]
+# 明确指定只在当前目录下查找包 (不包括 tests, logs 等)
+where = ["."]
+# 显式包含 dialoscope 包
+include = ["dialoscope*"]
+# 排除常见的非代码目录
+exclude = ["tests*", "logs*", "venv*"] 

@@ -1,5 +1,5 @@
 from openai import OpenAI
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterator
 
 from .base import LLMClient
 
@@ -18,7 +18,7 @@ class OpenAIClient(LLMClient):
         )
 
     def generate_response(self, messages: List[Dict[str, str]]) -> str:
-        """Generate a response using the OpenAI API."""
+        """Generate a complete response using the OpenAI API."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -29,6 +29,23 @@ class OpenAIClient(LLMClient):
             return content if content else ""
         except Exception as e:
             # TODO: Add more robust error handling
-            print(f"Error calling OpenAI API: {e}")
+            print(f"Error calling OpenAI API (non-stream): {e}")
             # In case of API error, return a predefined message or raise exception
-            return "[Error generating response from OpenAI]" 
+            return "[Error generating response from OpenAI]"
+
+    def generate_response_stream(self, messages: List[Dict[str, str]]) -> Iterator[str]:
+        """Generate a response stream using the OpenAI API."""
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+            )
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content is not None:
+                    yield content
+        except Exception as e:
+            print(f"Error calling OpenAI API (stream): {e}")
+            # In case of stream error, yield an error message chunk
+            yield "[Error generating streaming response from OpenAI]" 

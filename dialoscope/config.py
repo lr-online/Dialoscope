@@ -44,26 +44,68 @@ def load_config() -> Dict[str, Any]:
 
 CONFIG = load_config()
 
-def get_provider_config(provider_name: Optional[str] = None) -> Dict[str, Any]:
-    """Get configuration for a specific provider or the default provider."""
+def get_provider_details(provider_name: str) -> Dict[str, Any]:
+    """Get connection details for a specific provider."""
     if not CONFIG:
         raise ValueError("Configuration not loaded or empty.")
 
     providers = CONFIG.get('providers', {})
-    if not provider_name:
-        provider_name = CONFIG.get('default_provider')
-        if not provider_name:
-            raise ValueError("No default provider specified in configuration.")
+    if not providers:
+        raise ValueError("No 'providers' section found in configuration.")
 
-    provider_config = providers.get(provider_name)
-    if not provider_config:
-        raise ValueError(f"Configuration for provider '{provider_name}' not found.")
-    
+    provider_details = providers.get(provider_name)
+    if not provider_details:
+        raise ValueError(f"Configuration details for provider '{provider_name}' not found.")
+
     # Inject environment variables if needed (e.g., OpenAI API key)
-    if provider_name == 'openai' and 'api_key' not in provider_config:
+    if provider_name == 'openai' and 'api_key' not in provider_details:
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
-             provider_config['api_key'] = api_key
+             provider_details['api_key'] = api_key
         # If still no key, the client initialization should handle the error
-        
-    return provider_config 
+
+    return provider_details
+
+def get_agent_config(agent_role: str) -> Dict[str, Any]:
+    """
+    Get the configuration for a specific agent role directly from the 'agents' section.
+
+    Args:
+        agent_role: The role of the agent (e.g., 'proponent', 'opponent', 'judge').
+
+    Returns:
+        A dictionary containing the configuration for the agent,
+        including provider details merged in.
+
+    Raises:
+        ValueError: If the agent configuration or necessary keys (provider, model) are missing.
+    """
+    if not CONFIG:
+        raise ValueError("Configuration not loaded or empty.")
+
+    agents_config = CONFIG.get('agents', {})
+    if not agents_config:
+         raise ValueError("No 'agents' section found in configuration.")
+
+    agent_config = agents_config.get(agent_role)
+    if not agent_config:
+        raise ValueError(f"Configuration for agent role '{agent_role}' not found.")
+
+    # Ensure mandatory fields are present
+    provider_name = agent_config.get('provider')
+    model_name = agent_config.get('model')
+
+    if not provider_name:
+        raise ValueError(f"Agent '{agent_role}' configuration is missing the 'provider' key.")
+    if not model_name:
+        raise ValueError(f"Agent '{agent_role}' configuration is missing the 'model' key.")
+
+    # Fetch provider connection details
+    provider_details = get_provider_details(provider_name)
+
+    # Merge agent-specific config with provider details
+    # Agent config takes precedence if keys overlap (though unlikely for connection details)
+    final_config = provider_details.copy()
+    final_config.update(agent_config)
+
+    return final_config
