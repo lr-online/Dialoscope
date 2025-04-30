@@ -34,21 +34,24 @@ class Agent(abc.ABC):
                 "正方": "user", # 将正反方视为 user，让 LLM 扮演下一个角色
                 "反方": "user",
                 "评审": "assistant", # 评审的总结视为 assistant 回复
-                "系统": "system"
+                "系统": "system",
+                "评审 (最终报告)": "assistant" # 最终报告也视为 assistant
             }
             # 如果 history 中的角色不在映射中，暂时跳过或用默认值
             api_role = role_map.get(entry["role"], "user")
             # 确保 content 是字符串
             content = str(entry.get("content", ""))
-            messages.append({"role": api_role, "content": content})
+            # 避免添加空的 content
+            if content:
+                messages.append({"role": api_role, "content": content})
         return messages
 
     @abc.abstractmethod
     def generate_response(
-        self, 
-        proposition: str, 
-        history: List[Dict[str, Any]], 
-        current_round: int | None = None, 
+        self,
+        proposition: str,
+        history: List[Dict[str, Any]],
+        current_round: int | None = None,
         total_rounds: int | None = None
         ) -> str:
         """
@@ -90,12 +93,26 @@ class ProponentAgent(Agent):
         super().__init__(role="正方", **kwargs)
 
     def generate_response(self, proposition: str, history: List[Dict[str, Any]], **kwargs) -> str:
-        system_prompt = f"你现在是一个辩论中的正方。辩题是：'{proposition}'。你的任务是提出强有力的论点来支持这个命题，并反驳反方的观点。请根据当前的辩论历史，给出你的下一轮发言。请直接陈述你的观点和论据，不要说 '我是正方' 或进行角色扮演的确认。"
+        system_prompt = f"""
+你现在是一个结构化辩论中的 **正方** 辩手。
+**辩题是：'{proposition}'**
+
+**你的任务:**
+1.  **坚定支持** 正方立场，提出强有力的、逻辑清晰的论点和论据。
+2.  **直接回应** 反方上一轮提出的具体论点，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
+3.  **深化论证**: 在之前自己论点的基础上进一步展开，或引入新的角度来支持命题。
+4.  保持 **专业、客观、理性** 的辩论风格。
+
+**输出要求:**
+*   直接陈述你的观点和论据。
+*   **不要** 说 "我是正方" 或进行角色扮演的确认。
+*   如果合适，可以使用 Markdown 格式化你的回答（例如列表、重点）。
+"""
         messages = self._format_history_for_llm(history)
-        messages.insert(0, {"role": "system", "content": system_prompt})
-        
-        # 添加用户提示，指示该 LLM 发言
-        messages.append({"role": "user", "content": "现在轮到你作为正方发言了，请继续辩论。"})
+        messages.insert(0, {"role": "system", "content": system_prompt.strip()})
+
+        # 用户提示，指示该 LLM 发言
+        messages.append({"role": "user", "content": "现在轮到你作为 **正方** 发言了。请严格按照要求，分析反方上一轮的发言并进行反驳，同时加强你方论点。"}) # Updated user prompt
 
         return self._call_llm(messages)
 
@@ -106,12 +123,26 @@ class OpponentAgent(Agent):
         super().__init__(role="反方", **kwargs)
 
     def generate_response(self, proposition: str, history: List[Dict[str, Any]], **kwargs) -> str:
-        system_prompt = f"你现在是一个辩论中的反方。辩题是：'{proposition}'。你的任务是提出强有力的论点来反驳这个命题，并对正方的论点进行质疑。请根据当前的辩论历史，给出你的下一轮发言。请直接陈述你的观点和论据，不要说 '我是反方' 或进行角色扮演的确认。"
+        system_prompt = f"""
+你现在是一个结构化辩论中的 **反方** 辩手。
+**辩题是：'{proposition}'**
+
+**你的任务:**
+1.  **坚定反对** 正方立场，提出强有力的、逻辑清晰的论点和论据来反驳命题。
+2.  **直接回应** 正方上一轮提出的具体论点，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
+3.  **深化论证**: 在之前自己论点的基础上进一步展开，或引入新的角度来反驳命题。
+4.  保持 **专业、客观、理性** 的辩论风格。
+
+**输出要求:**
+*   直接陈述你的观点和论据。
+*   **不要** 说 "我是反方" 或进行角色扮演的确认。
+*   如果合适，可以使用 Markdown 格式化你的回答（例如列表、重点）。
+"""
         messages = self._format_history_for_llm(history)
-        messages.insert(0, {"role": "system", "content": system_prompt})
-        
-        # 添加用户提示，指示该 LLM 发言
-        messages.append({"role": "user", "content": "现在轮到你作为反方发言了，请继续辩论。"})
+        messages.insert(0, {"role": "system", "content": system_prompt.strip()})
+
+        # 用户提示，指示该 LLM 发言
+        messages.append({"role": "user", "content": "现在轮到你作为 **反方** 发言了。请严格按照要求，分析正方上一轮的发言并进行反驳，同时加强你方论点。"}) # Updated user prompt
 
         return self._call_llm(messages)
 
@@ -123,20 +154,57 @@ class JudgeAgent(Agent):
 
     def generate_response(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> str:
         messages = self._format_history_for_llm(history)
-
         is_final_round = current_round is not None and total_rounds is not None and current_round == total_rounds
 
         if is_final_round:
-            system_prompt = f"你现在是一个辩论的评审。辩题是：'{proposition}'。辩论现已结束。你的任务是基于完整的辩论历史，给出一个中立、全面的最终总结报告。报告应包括：双方核心论点梳理、关键交锋点分析、论证质量评估（优点与不足）、可能存在的逻辑谬误或未覆盖的视角。请直接给出总结报告，不要说 '我是评审'。"
-            user_instruction = "请根据以上辩论给出最终总结报告。"
+            system_prompt = f"""
+你现在是一个 **中立且客观** 的辩论评审员。
+**辩题是：'{proposition}'**
+辩论现已 **结束** (共 {total_rounds} 轮)。
+
+**你的任务:**
+基于 **完整** 的辩论历史，给出一个 **结构化** 的最终总结报告。报告必须包含以下部分 (请使用 Markdown 标题):
+
+1.  `### 双方核心论点总结`
+    *   简明扼要地分别概括正反双方的主要论证思路和核心证据。
+2.  `### 关键交锋点分析`
+    *   识别并分析几轮辩论中最主要的矛盾点和双方争论的焦点。
+3.  `### 论证质量评估`
+    *   分别评估正反双方论证的优点（如逻辑性、证据充分性、回应有效性）和不足（如逻辑漏洞、回避问题、证据不足）。
+4.  `### 待解决问题与启发`
+    *   指出辩论结束后仍未完全解决的关键问题，或辩论过程带来的新思考角度/启发。
+
+**输出要求:**
+*   保持 **绝对中立**，不对任何一方有偏好。
+*   语言精炼、客观。
+*   **不要** 说 "我是评审" 或进行角色扮演的确认。
+*   **必须** 使用 Markdown 格式化报告，特别是标题。
+"""
+            user_instruction = "请根据以上整场辩论的详细记录，严格按照要求生成结构化的最终总结报告。"
+            max_tokens_multiplier = 1.5 # 最终报告需要更长
         else:
-            system_prompt = f"你现在是一个辩论的评审。辩题是：'{proposition}'。当前辩论正在进行中。你的任务是基于到目前为止的辩论历史，进行一次简短的中立总结，提炼双方的要点和分歧，并可能提出引导性问题或建议下一轮的讨论焦点，以促进辩论深入。请直接给出你的总结和引导，不要说 '我是评审'。"
-            user_instruction = f"请对第 {current_round} 轮辩论进行总结，并引导下一轮（总共 {total_rounds} 轮）。"
-        
-        messages.insert(0, {"role": "system", "content": system_prompt})
+            system_prompt = f"""
+你现在是一个 **中立且客观** 的辩论评审员。
+**辩题是：'{proposition}'**
+当前辩论正在进行中，刚刚结束第 {current_round} 轮 (共 {total_rounds} 轮)。
+
+**你的任务:**
+1.  **精炼总结** 刚刚结束的 **第 {current_round} 轮** 双方的主要论点和 **最关键的分歧**。
+2.  **提出引导**: 基于本轮总结，提出 **1-2个清晰、具体的问题或讨论焦点**，引导双方在 **下一轮** 进行更深入、更有针对性的辩论。避免空泛的引导。
+
+**输出要求:**
+*   保持 **绝对中立**。
+*   总结要 **简洁**，聚焦本轮核心内容。
+*   引导性问题要 **明确**，能推动辩论进展。
+*   **不要** 说 "我是评审" 或进行角色扮演的确认。
+*   可以使用 Markdown 格式化回答。
+"""
+            user_instruction = f"请严格按照要求，对第 {current_round} 轮辩论进行简洁总结，并给出对下一轮的具体引导问题或焦点。"
+            max_tokens_multiplier = 1.0 # 轮间总结不需要太长
+
+        messages.insert(0, {"role": "system", "content": system_prompt.strip()}) # 使用 strip() 清理前后空白
         messages.append({"role": "user", "content": user_instruction})
 
-        # 对于评审，可能需要更长的输出来做总结
-        return self._call_llm(messages, max_tokens=DEFAULT_MAX_TOKENS + 512) # 增加 token 限制
-
-    # generate_final_report 方法不再需要，其逻辑已合并到 generate_response 
+        # 根据是否最终轮调整 token 限制
+        adjusted_max_tokens = int(DEFAULT_MAX_TOKENS * max_tokens_multiplier)
+        return self._call_llm(messages, max_tokens=adjusted_max_tokens) 
