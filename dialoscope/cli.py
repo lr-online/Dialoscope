@@ -1,33 +1,61 @@
-import argparse
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from typing_extensions import Annotated
+
 from dialoscope.core.debate_manager import DebateManager
+from dialoscope.core.agents import DEFAULT_MODEL
 
-def main():
-    parser = argparse.ArgumentParser(description="Dialoscope: AI 多角色辩论框架")
-    parser.add_argument("proposition", type=str, help="请输入辩论的命题或问题")
-    parser.add_argument("-r", "--rounds", type=int, default=3, help="设置辩论的轮数 (默认: 3)")
-    parser.add_argument("--log-dir", type=str, default="logs", help="指定日志文件存放目录 (默认: logs)")
-    # TODO: 后续可以添加选择 LLM 模型、配置 API Key 等参数
+# 初始化 Typer app 和 Rich Console
+app = typer.Typer(help="Dialoscope: AI 多角色辩论框架")
+console = Console()
 
-    args = parser.parse_args()
+# 定义角色颜色
+ROLE_STYLES = {
+    "系统": "dim blue",
+    "正方": "bold green",
+    "反方": "bold red",
+    "评审": "bold yellow",
+    "评审 (最终报告)": "bold magenta",
+    "错误": "bold white on red",
+}
 
-    if not args.proposition:
-        print("错误：必须提供辩论命题。")
-        parser.print_help()
-        return
+def print_message(role: str, content: str):
+    """使用 Rich Console 打印带样式的消息"""
+    style = ROLE_STYLES.get(role, "default") # 获取样式，若无则用默认
+    # 使用 Panel 包装，增加视觉区分度
+    console.print(Panel(content, title=role, border_style=style, expand=True))
 
-    print("欢迎使用 Dialoscope!")
-    print("正在初始化辩论...")
+@app.command()
+def run(
+    proposition: Annotated[str, typer.Argument(help="请输入辩论的命题或问题。例如：'人工智能最终会拥有自我意识吗？'")],
+    rounds: Annotated[int, typer.Option("-r", "--rounds", help="设置辩论的轮数")] = 3,
+    log_dir: Annotated[str, typer.Option("--log-dir", help="指定日志文件存放目录")] = "logs",
+    model: Annotated[str, typer.Option("--model", help="指定使用的 LLM 模型")] = DEFAULT_MODEL,
+):
+    """开始一场新的 AI 辩论"""
+    console.print(Panel(f"欢迎使用 Dialoscope!\n辩题: [bold cyan]{proposition}[/bold cyan]\n轮数: {rounds}\n模型: {model}", title="Dialoscope 初始化", border_style="blue"))
+    console.print("正在初始化辩论...")
 
     try:
+        # 创建 DebateManager，并传入打印函数
         manager = DebateManager(
-            proposition=args.proposition,
-            rounds=args.rounds,
-            log_dir=args.log_dir
+            proposition=proposition,
+            rounds=rounds,
+            log_dir=log_dir,
+            model=model,
+            printer=print_message # 传入打印回调
         )
+        # 运行辩论（现在由 manager 内部通过 printer 打印）
         manager.run_debate()
-        print("\n辩论流程结束。")
+        console.print("[bold green]辩论流程结束。[/bold green]")
+    except (ValueError, RuntimeError) as e:
+        # 初始化 Agent 时可能抛出环境错误
+        print_message("错误", f"初始化失败: {e}")
+        raise typer.Exit(code=1)
     except Exception as e:
-        print(f"\n运行过程中出现错误: {e}")
+        print_message("错误", f"运行过程中出现意外错误: {e}")
+        raise typer.Exit(code=1)
 
 if __name__ == "__main__":
-    main()
+    app()
