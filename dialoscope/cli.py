@@ -1,6 +1,7 @@
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.markdown import Markdown
 from typing_extensions import Annotated
 
 from dialoscope.core.debate_manager import DebateManager
@@ -21,10 +22,12 @@ ROLE_STYLES = {
 }
 
 def print_message(role: str, content: str):
-    """使用 Rich Console 打印带样式的消息"""
-    style = ROLE_STYLES.get(role, "default") # 获取样式，若无则用默认
-    # 使用 Panel 包装，增加视觉区分度
-    console.print(Panel(content, title=role, border_style=style, expand=True))
+    """使用 Rich Console 打印带样式的消息，并渲染 Markdown"""
+    style = ROLE_STYLES.get(role, "default")
+    # 创建 Markdown 对象来渲染内容
+    markdown_content = Markdown(content)
+    # 将渲染后的 Markdown 内容放入 Panel 中
+    console.print(Panel(markdown_content, title=role, border_style=style, expand=True))
 
 @app.command()
 def run(
@@ -34,23 +37,21 @@ def run(
     model: Annotated[str, typer.Option("--model", help="指定使用的 LLM 模型")] = DEFAULT_MODEL,
 ):
     """开始一场新的 AI 辩论"""
-    console.print(Panel(f"欢迎使用 Dialoscope!\n辩题: [bold cyan]{proposition}[/bold cyan]\n轮数: {rounds}\n模型: {model}", title="Dialoscope 初始化", border_style="blue"))
-    console.print("正在初始化辩论...")
+    # 使用 Markdown 来格式化初始信息
+    init_message = f"欢迎使用 Dialoscope!\n\n辩题: **{proposition}**\n轮数: {rounds}\n模型: {model}"
+    console.print(Panel(Markdown(init_message), title="Dialoscope 初始化", border_style="blue"))
 
     try:
-        # 创建 DebateManager，并传入打印函数
         manager = DebateManager(
             proposition=proposition,
             rounds=rounds,
             log_dir=log_dir,
             model=model,
-            printer=print_message # 传入打印回调
+            printer=print_message
         )
-        # 运行辩论（现在由 manager 内部通过 printer 打印）
         manager.run_debate()
-        console.print("[bold green]辩论流程结束。[/bold green]")
+        console.print(Panel(Markdown("**辩论流程结束。**"), border_style="green"))
     except (ValueError, RuntimeError) as e:
-        # 初始化 Agent 时可能抛出环境错误
         print_message("错误", f"初始化失败: {e}")
         raise typer.Exit(code=1)
     except Exception as e:
