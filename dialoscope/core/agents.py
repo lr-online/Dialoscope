@@ -2,7 +2,7 @@ import abc
 import os
 from typing import List, Dict, Any
 
-import openai
+from dialoscope.llm_clients import LLMClient
 
 # 默认模型配置
 DEFAULT_MODEL = "gpt-4o"
@@ -12,41 +12,44 @@ DEFAULT_TEMPERATURE = 0.7
 class Agent(abc.ABC):
     """AI 辩论角色的基类"""
 
-    def __init__(self, role: str, model: str = DEFAULT_MODEL, **kwargs):
+    def __init__(self, role: str, llm_client: LLMClient):
         self.role = role
-        self.model = model
-        # 从环境变量初始化 OpenAI 客户端
-        try:
-            self.client = openai.OpenAI(
-                api_key=os.environ["OPENAI_API_KEY"],
-                base_url=os.environ.get("OPENAI_BASE_URL") # base_url 是可选的
-            )
-        except KeyError as e:
-            raise ValueError(f"错误：缺少环境变量 {e}。请确保设置了 OPENAI_API_KEY。") from e
-        except Exception as e:
-            raise RuntimeError(f"初始化 OpenAI 客户端时出错: {e}") from e
+        self.llm_client = llm_client
 
     def _format_history_for_llm(self, history: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-        """将内部历史记录格式化为 OpenAI API 需要的格式"""
+        """将内部历史记录格式化为 LLM API 需要的格式"""
         messages = []
         for entry in history:
             role_map = {
-                "正方": "user", # 将正反方视为 user，让 LLM 扮演下一个角色
+                "正方": "user",
                 "反方": "user",
-                "评审": "assistant", # 评审的总结视为 assistant 回复
+                "评审": "assistant",
                 "系统": "system",
-                "评审 (最终报告)": "assistant" # 最终报告也视为 assistant
+                "评审 (最终报告)": "assistant"
             }
-            # 如果 history 中的角色不在映射中，暂时跳过或用默认值
             api_role = role_map.get(entry["role"], "user")
-            # 确保 content 是字符串
             content = str(entry.get("content", ""))
-            # 避免添加空的 content
             if content:
+                # Basic check to ensure role is valid for most APIs (user, assistant, system)
+                if api_role not in ["user", "assistant", "system"]:
+                    print(f"Warning: Mapping role '{entry['role']}' to '{api_role}', which might not be standard.")
                 messages.append({"role": api_role, "content": content})
         return messages
 
     @abc.abstractmethod
+    def _create_llm_messages(
+        self,
+        proposition: str,
+        history: List[Dict[str, Any]],
+        current_round: int | None = None,
+        total_rounds: int | None = None
+        ) -> List[Dict[str, str]]:
+        """
+        为特定角色和情境创建发送给 LLM 的消息列表。
+        子类必须实现此方法来定义它们的提示和逻辑。
+        """
+        pass
+
     def generate_response(
         self,
         proposition: str,
@@ -64,95 +67,128 @@ class Agent(abc.ABC):
         Returns:
             当前角色的回应字符串。
         """
-        pass
+        # 1. Create messages using the subclass's logic
+        messages = self._create_llm_messages(proposition, history, current_round, total_rounds)
 
-    def _call_llm(self, messages: List[Dict[str, str]], max_tokens: int = DEFAULT_MAX_TOKENS, temperature: float = DEFAULT_TEMPERATURE) -> str:
-        """调用 LLM API"""
+        # 2. Call the LLM client's generation method
         try:
-            completion = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            response = completion.choices[0].message.content
-            if response is None:
+            response = self.llm_client.generate_response(messages)
+            # Basic check for empty response
+            if not response:
                 return "(模型未返回有效内容)"
             return response.strip()
-        except openai.APIError as e:
-            print(f"OpenAI API 返回错误: {e}")
-            return f"(调用 API 时出错: {e})"
         except Exception as e:
-            print(f"调用 LLM 时发生未知错误: {e}")
-            return f"(内部错误: {e})"
+            # Catch potential errors from the client's generate_response
+            print(f"Error during LLM response generation for {self.role}: {e}")
+            return f"(调用 {type(self.llm_client).__name__} 时出错: {e})"
 
 
 class ProponentAgent(Agent):
     """正方 AI"""
-    def __init__(self, **kwargs):
-        super().__init__(role="正方", **kwargs)
+    def __init__(self, llm_client: LLMClient):
+        super().__init__(role="正方", llm_client=llm_client)
 
-    def generate_response(self, proposition: str, history: List[Dict[str, Any]], **kwargs) -> str:
-        system_prompt = f"""
+    def _create_llm_messages(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> List[Dict[str, str]]:
+        messages = self._format_history_for_llm(history)
+        is_first_round = len(history) <= 1 # Check if it's the opening statement
+
+        if is_first_round:
+            system_prompt = f"""
 你现在是一个结构化辩论中的 **正方** 辩手。
 **辩题是：'{proposition}'**
 
-**你的任务:**
-1.  **坚定支持** 正方立场，提出强有力的、逻辑清晰的论点和论据。
-2.  **直接回应** 反方上一轮提出的具体论点，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
-3.  **深化论证**: 在之前自己论点的基础上进一步展开，或引入新的角度来支持命题。
+**你的任务 (开场陈述):**
+1.  **清晰阐述** 你支持 **'{proposition}'** 的核心立场。
+2.  提出 **2-3个强有力、逻辑清晰的初始论点** 来支持你的立场，可以简要提及论据方向。
+3.  为接下来的辩论奠定基础。
+4.  保持 **专业、客观、理性** 的辩论风格。
+
+**输出要求:**
+*   直接陈述你的立场和初始论点。
+*   **不要** 进行角色扮演的确认 (例如，不要说 "我是正方")。
+*   如果合适，可以使用 Markdown 格式化你的回答。
+"""
+            user_instruction = f"请针对辩题 '{proposition}'，作为正方发表你的开场陈述。"
+        else:
+            system_prompt = f"""
+你现在是一个结构化辩论中的 **正方** 辩手。
+**辩题是：'{proposition}'**
+这是第 {current_round} 轮辩论 (共 {total_rounds} 轮)。请回顾之前的辩论历史。
+
+**你的任务 (回应与深化):**
+1.  **直接回应** 反方在 **上一轮** 中提出的 **具体论点**，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
+2.  在之前自己论点的基础上 **深化论证**，或引入新的角度来支持命题。
+3.  **重申并加强** 你的核心立场。
 4.  保持 **专业、客观、理性** 的辩论风格。
 
 **输出要求:**
 *   直接陈述你的观点和论据。
-*   **不要** 说 "我是正方" 或进行角色扮演的确认。
-*   如果合适，可以使用 Markdown 格式化你的回答（例如列表、重点）。
+*   **不要** 进行角色扮演的确认。
+*   清晰地指明你在回应反方的哪些观点。
+*   如果合适，可以使用 Markdown 格式化你的回答。
 """
-        messages = self._format_history_for_llm(history)
+            user_instruction = f"现在轮到你作为 **正方** 发言 (第 {current_round}/{total_rounds} 轮)。请严格按照要求，分析并反驳反方上一轮的发言，同时加强并深化你方论点。"
+
         messages.insert(0, {"role": "system", "content": system_prompt.strip()})
-
-        # 用户提示，指示该 LLM 发言
-        messages.append({"role": "user", "content": "现在轮到你作为 **正方** 发言了。请严格按照要求，分析反方上一轮的发言并进行反驳，同时加强你方论点。"}) # Updated user prompt
-
-        return self._call_llm(messages)
+        return messages
 
 
 class OpponentAgent(Agent):
     """反方 AI"""
-    def __init__(self, **kwargs):
-        super().__init__(role="反方", **kwargs)
+    def __init__(self, llm_client: LLMClient):
+        super().__init__(role="反方", llm_client=llm_client)
 
-    def generate_response(self, proposition: str, history: List[Dict[str, Any]], **kwargs) -> str:
-        system_prompt = f"""
+    def _create_llm_messages(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> List[Dict[str, str]]:
+        messages = self._format_history_for_llm(history)
+        is_first_round = len(history) <= 1 # Check if it's the opening statement
+
+        if is_first_round:
+            system_prompt = f"""
 你现在是一个结构化辩论中的 **反方** 辩手。
 **辩题是：'{proposition}'**
 
-**你的任务:**
-1.  **坚定反对** 正方立场，提出强有力的、逻辑清晰的论点和论据来反驳命题。
-2.  **直接回应** 正方上一轮提出的具体论点，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
-3.  **深化论证**: 在之前自己论点的基础上进一步展开，或引入新的角度来反驳命题。
+**你的任务 (开场陈述):**
+1.  **清晰阐述** 你反对 **'{proposition}'** 的核心立场。
+2.  提出 **2-3个强有力、逻辑清晰的初始论点** 来反驳你的立场，可以简要提及论据方向。
+3.  为接下来的辩论奠定基础。
+4.  保持 **专业、客观、理性** 的辩论风格。
+
+**输出要求:**
+*   直接陈述你的立场和初始论点。
+*   **不要** 进行角色扮演的确认 (例如，不要说 "我是反方")。
+*   如果合适，可以使用 Markdown 格式化你的回答。
+"""
+            user_instruction = f"请针对辩题 '{proposition}'，作为反方发表你的开场陈述。"
+        else:
+            system_prompt = f"""
+你现在是一个结构化辩论中的 **反方** 辩手。
+**辩题是：'{proposition}'**
+这是第 {current_round} 轮辩论 (共 {total_rounds} 轮)。请回顾之前的辩论历史。
+
+**你的任务 (回应与深化):**
+1.  **直接回应** 正方在 **上一轮** 中提出的 **具体论点**，进行有力的反驳和质疑。指出其逻辑漏洞、证据不足或与现实不符之处。
+2.  在之前自己论点的基础上 **深化论证**，或引入新的角度来反驳命题。
+3.  **重申并加强** 你的核心立场。
 4.  保持 **专业、客观、理性** 的辩论风格。
 
 **输出要求:**
 *   直接陈述你的观点和论据。
-*   **不要** 说 "我是反方" 或进行角色扮演的确认。
-*   如果合适，可以使用 Markdown 格式化你的回答（例如列表、重点）。
+*   **不要** 进行角色扮演的确认。
+*   清晰地指明你在回应正方的哪些观点。
+*   如果合适，可以使用 Markdown 格式化你的回答。
 """
-        messages = self._format_history_for_llm(history)
+            user_instruction = f"现在轮到你作为 **反方** 发言 (第 {current_round}/{total_rounds} 轮)。请严格按照要求，分析并反驳正方上一轮的发言，同时加强并深化你方论点。"
+
         messages.insert(0, {"role": "system", "content": system_prompt.strip()})
-
-        # 用户提示，指示该 LLM 发言
-        messages.append({"role": "user", "content": "现在轮到你作为 **反方** 发言了。请严格按照要求，分析正方上一轮的发言并进行反驳，同时加强你方论点。"}) # Updated user prompt
-
-        return self._call_llm(messages)
+        return messages
 
 
 class JudgeAgent(Agent):
     """评审 AI"""
-    def __init__(self, **kwargs):
-        super().__init__(role="评审", **kwargs)
+    def __init__(self, llm_client: LLMClient):
+        super().__init__(role="评审", llm_client=llm_client)
 
-    def generate_response(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> str:
+    def _create_llm_messages(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> List[Dict[str, str]]:
         messages = self._format_history_for_llm(history)
         is_final_round = current_round is not None and total_rounds is not None and current_round == total_rounds
 
@@ -181,15 +217,22 @@ class JudgeAgent(Agent):
 *   **必须** 使用 Markdown 格式化报告，特别是标题。
 """
             user_instruction = "请根据以上整场辩论的详细记录，严格按照要求生成结构化的最终总结报告。"
-            max_tokens_multiplier = 1.5 # 最终报告需要更长
         else:
+            if current_round is None or total_rounds is None:
+                print("Warning: Missing round information for intermediate judge summary. Generating generic prompt.")
+                current_round_str = "当前"
+                total_rounds_str = "未知"
+            else:
+                current_round_str = str(current_round)
+                total_rounds_str = str(total_rounds)
+
             system_prompt = f"""
 你现在是一个 **中立且客观** 的辩论评审员。
 **辩题是：'{proposition}'**
-当前辩论正在进行中，刚刚结束第 {current_round} 轮 (共 {total_rounds} 轮)。
+当前辩论正在进行中，刚刚结束第 {current_round_str} 轮 (共 {total_rounds_str} 轮)。
 
 **你的任务:**
-1.  **精炼总结** 刚刚结束的 **第 {current_round} 轮** 双方的主要论点和 **最关键的分歧**。
+1.  **精炼总结** 刚刚结束的 **第 {current_round_str} 轮** 双方的主要论点和 **最关键的分歧**。
 2.  **提出引导**: 基于本轮总结，提出 **1-2个清晰、具体的问题或讨论焦点**，引导双方在 **下一轮** 进行更深入、更有针对性的辩论。避免空泛的引导。
 
 **输出要求:**
@@ -199,12 +242,13 @@ class JudgeAgent(Agent):
 *   **不要** 说 "我是评审" 或进行角色扮演的确认。
 *   可以使用 Markdown 格式化回答。
 """
-            user_instruction = f"请严格按照要求，对第 {current_round} 轮辩论进行简洁总结，并给出对下一轮的具体引导问题或焦点。"
-            max_tokens_multiplier = 1.0 # 轮间总结不需要太长
+            user_instruction = f"请严格按照要求，对第 {current_round_str} 轮辩论进行简洁总结，并给出对下一轮的具体引导问题或焦点。"
 
-        messages.insert(0, {"role": "system", "content": system_prompt.strip()}) # 使用 strip() 清理前后空白
+        messages.insert(0, {"role": "system", "content": system_prompt.strip()})
         messages.append({"role": "user", "content": user_instruction})
 
-        # 根据是否最终轮调整 token 限制
-        adjusted_max_tokens = int(DEFAULT_MAX_TOKENS * max_tokens_multiplier)
-        return self._call_llm(messages, max_tokens=adjusted_max_tokens) 
+        return messages
+
+    def generate_response(self, proposition: str, history: List[Dict[str, Any]], current_round: int | None = None, total_rounds: int | None = None) -> str:
+        messages = self._create_llm_messages(proposition, history, current_round, total_rounds)
+        return self.llm_client.generate_response(messages) 

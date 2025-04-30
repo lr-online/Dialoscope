@@ -1,3 +1,5 @@
 openai
 typer[all]
 rich
+PyYAML
+ollama

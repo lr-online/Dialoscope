@@ -1,0 +1,18 @@
+# LLM Provider Configurations
+
+# Default provider to use if not specified via command line
+default_provider: openai
+
+providers:
+  openai:
+    # Ensure you have OPENAI_API_KEY set as an environment variable
+    # Alternatively, you can uncomment and set the api_key directly here (less recommended)
+    # api_key: "sk-..." 
+    # base_url: "https://api.openai.com/v1" # Optional: Override for OpenAI-like APIs (e.g., Groq, Together)
+    model: "gpt-4o"
+
+  ollama:
+    base_url: "http://localhost:11434" # Default Ollama API endpoint
+    model: "gemma3:latest" # Specify the default Ollama model to use
+    # Optional: Specify request timeout in seconds
+    # timeout: 60 
