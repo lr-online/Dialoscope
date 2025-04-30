@@ -132,7 +132,7 @@ class DebateManager:
         """保存辩论日志到文件"""
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_proposition = "".join(c if c.isalnum() else '_' for c in self.proposition[:30])
-        filename = f"debate_{safe_proposition}_{timestamp}.json"
+        filename = f"{timestamp}_{safe_proposition}.json"
         filepath = os.path.join(self.log_dir, filename)
         try:
             with open(filepath, 'w', encoding='utf-8') as f:

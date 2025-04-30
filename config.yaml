@@ -1,3 +1,22 @@
+# LLM Provider Configurations
+# Define connection details for each LLM provider used by the agents.
+providers:
+  openai:
+    enabled: true
+    # Ensure you have OPENAI_API_KEY set as an environment variable
+    # Alternatively, you can uncomment and set the api_key directly here (less recommended)
+    # api_key: "sk-..."
+    # base_url: "https://api.openai.com/v1" # Optional: Override for OpenAI-like APIs
+
+  ollama:
+    base_url: "http://localhost:11434" # Default Ollama API endpoint
+    # Optional: Specify request timeout in seconds
+    # timeout: 60
+
+  # anthropic:
+  #   api_key: "YOUR_ANTHROPIC_KEY_HERE"
+  #   # base_url: "https://api.anthropic.com/v1" # Check Anthropic docs for correct URL
+
 # Agent Configurations
 # Define settings for each agent participating in the debate.
 agents:
@@ -17,22 +36,3 @@ agents:
     provider: openai
     model: gpt-4o-mini
     # prompt: "You are the impartial judge, evaluating the arguments based on logic and evidence..."
-
-# LLM Provider Configurations
-# Define connection details for each LLM provider used by the agents.
-providers:
-  openai:
-    enabled: true
-    # Ensure you have OPENAI_API_KEY set as an environment variable
-    # Alternatively, you can uncomment and set the api_key directly here (less recommended)
-    # api_key: "sk-..."
-    # base_url: "https://api.openai.com/v1" # Optional: Override for OpenAI-like APIs
-
-  ollama:
-    base_url: "http://localhost:11434" # Default Ollama API endpoint
-    # Optional: Specify request timeout in seconds
-    # timeout: 60
-
-  # anthropic:
-  #   api_key: "YOUR_ANTHROPIC_KEY_HERE"
-  #   # base_url: "https://api.anthropic.com/v1" # Check Anthropic docs for correct URL
